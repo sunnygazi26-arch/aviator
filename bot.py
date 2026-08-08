@@ -1,6 +1,11 @@
+import sys
+import os
+
+# Render Logs-এ রিয়েলটাইম এরর দেখার জন্য আউটপুট আনবাফার করা হচ্ছে
+os.environ["PYTHONUNBUFFERED"] = "1"
+
 import logging
 import asyncio
-import os
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -20,6 +25,23 @@ from telegram.error import BadRequest, Forbidden
 import firebase_admin
 from firebase_admin import credentials, db
 
+# ================= SAFE ENV PARSER =================
+def get_env_int(key, default_value):
+    val = os.getenv(key)
+    if not val:
+        return default_value
+    try:
+        return int(val.strip())
+    except ValueError:
+        print(f"⚠️ WARNING: Environment variable {key}='{val}' is invalid integer. Using default: {default_value}")
+        return default_value
+
+# ================= CONFIGURATION =================
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8789480117:AAHQZ63ewvn7jjJMUxa9yLFRDemnS0zvSjA").strip()
+ADMIN_ID = get_env_int("ADMIN_ID", 1146186608)
+REQUIRED_CHANNEL = get_env_int("REQUIRED_CHANNEL", -1001481593780)
+CHANNEL_LINK = "https://t.me/+3U0nMzWs4Aw0YjFl"
+
 # ================= RENDER DUMMY SERVER =================
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -35,7 +57,7 @@ def run_dummy_server():
         print(f"🌐 Web server running on port {port}")
         server.serve_forever()
     except Exception as e:
-        print(f"⚠️ Dummy server warning: {e}")
+        print(f"⚠️ Dummy server error: {e}")
 
 # ================= FIREBASE SETUP =================
 FIREBASE_DB_URL = "https://telegrambotdb-d2b45-default-rtdb.asia-southeast1.firebasedatabase.app/"
@@ -45,28 +67,22 @@ try:
     if not firebase_admin._apps:
         if FIREBASE_CREDENTIALS_RAW:
             try:
-                creds_dict = json.loads(FIREBASE_CREDENTIALS_RAW)
+                creds_dict = json.loads(FIREBASE_CREDENTIALS_RAW.strip())
                 if "private_key" in creds_dict:
                     creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
                 cred = credentials.Certificate(creds_dict)
                 firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
                 print("🔥 Firebase connected via ENV Variable! ✅")
-            except json.JSONDecodeError as e:
+            except Exception as e:
                 print(f"❌ JSON ERROR in FIREBASE_CREDENTIALS: {e}")
         elif os.path.exists("firebase_credentials.json"):
             cred = credentials.Certificate("firebase_credentials.json")
             firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
             print("🔥 Firebase connected via JSON File! ✅")
         else:
-            print("⚠️ WARNING: No Firebase Credentials found! Bot running without Firebase.")
+            print("⚠️ WARNING: No Firebase Credentials found! Running without Firebase.")
 except Exception as e:
     print(f"❌ FIREBASE INITIALIZATION ERROR: {e}")
-
-# ================= CONFIGURATION =================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8789480117:AAHQZ63ewvn7jjJMUxa9yLFRDemnS0zvSjA")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "1146186608"))
-REQUIRED_CHANNEL = int(os.getenv("REQUIRED_CHANNEL", "-1001481593780"))
-CHANNEL_LINK = "https://t.me/+3U0nMzWs4Aw0YjFl"
 
 # --- MEDIA LINKS ---
 IMAGE_URL_WELCOME = "https://i.ibb.co/XfxnhBYY/file-000000006ac47206b9a3e5b41d2e17e1.png"
@@ -144,14 +160,13 @@ def check_postback_id(account_id):
         print(f"❌ Firebase check_postback_id Error: {e}")
         return False
 
-# ================= SAFE MEMBERSHIP CHECK =================
+# ================= MEMBERSHIP CHECK =================
 async def check_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE):
     try:
         member = await context.bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
         return member.status in [ChatMember.MEMBER, ChatMember.OWNER, ChatMember.ADMINISTRATOR]
     except Exception as e:
-        print(f"⚠️ CHANNEL CHECK ERROR (Make sure bot is ADMIN in channel {REQUIRED_CHANNEL}): {e}")
-        # যদি চ্যানেল চেক ফেল করে (যেমন বট এডমিন না থাকে), সাময়িকভাবে পাস করিয়ে দিবে যাতে বট আটকে না থাকে
+        print(f"⚠️ CHANNEL CHECK NOTICE: {e}")
         return True
 
 async def send_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -337,25 +352,31 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= MAIN =================
 if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-    threading.Thread(target=run_dummy_server, daemon=True).start()
+    try:
+        logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+        print("🚀 Starting Telegram Bot process...")
+        
+        threading.Thread(target=run_dummy_server, daemon=True).start()
 
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+        application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    verify_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(verify_process_start, pattern='^verify_reg$')],
-        states={WAITING_FOR_ID:[MessageHandler(filters.TEXT & ~filters.COMMAND, receive_id)]},
-        fallbacks=[CommandHandler('cancel', cancel)],
-        allow_reentry=True
-    )
+        verify_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(verify_process_start, pattern='^verify_reg$')],
+            states={WAITING_FOR_ID:[MessageHandler(filters.TEXT & ~filters.COMMAND, receive_id)]},
+            fallbacks=[CommandHandler('cancel', cancel)],
+            allow_reentry=True
+        )
 
-    application.add_handler(verify_conv)
-    application.add_handler(CommandHandler('start', start))
-    application.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join_status$'))
-    application.add_handler(CallbackQueryHandler(language_handler, pattern='^lang_'))
-    application.add_handler(CallbackQueryHandler(show_registration_info, pattern='^start_earning$'))
-    application.add_handler(CallbackQueryHandler(play_hack_menu, pattern='^play_hack_action$'))
-    application.add_handler(CallbackQueryHandler(game_selection_handler, pattern='^game_'))
+        application.add_handler(verify_conv)
+        application.add_handler(CommandHandler('start', start))
+        application.add_handler(CallbackQueryHandler(check_join_callback, pattern='^check_join_status$'))
+        application.add_handler(CallbackQueryHandler(language_handler, pattern='^lang_'))
+        application.add_handler(CallbackQueryHandler(show_registration_info, pattern='^start_earning$'))
+        application.add_handler(CallbackQueryHandler(play_hack_menu, pattern='^play_hack_action$'))
+        application.add_handler(CallbackQueryHandler(game_selection_handler, pattern='^game_'))
 
-    print("Bot is starting polling...")
-    application.run_polling()
+        print("🤖 Telegram Bot Polling started successfully! Listening for messages...")
+        application.run_polling()
+    except Exception as fatal_error:
+        print(f"❌ FATAL ERROR CAUSING CRASH: {fatal_error}")
+        sys.exit(1)
