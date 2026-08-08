@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import os
+import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember, WebAppInfo
@@ -32,18 +33,27 @@ def run_dummy_server():
     server = HTTPServer(("0.0.0.0", port), DummyHandler)
     server.serve_forever()
 
-# ================= FIREBASE SETUP =================
+# ================= FIREBASE SETUP (NO FILE REQUIRED) =================
 FIREBASE_DB_URL = "https://telegrambotdb-d2b45-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-# রেন্ডারে Secret File কোথায় আছে তা চেক করার জন্য
-if os.path.exists("/etc/secrets/firebase_credentials.json"):
-    CREDENTIALS_FILE = "/etc/secrets/firebase_credentials.json"
-else:
-    CREDENTIALS_FILE = "firebase_credentials.json"
+# রেন্ডারের Environment Variable থেকে সরাসরি JSON ডাটা পড়া হবে
+FIREBASE_CREDENTIALS_RAW = os.getenv("FIREBASE_CREDENTIALS")
 
 try:
     if not firebase_admin._apps:
-        cred = credentials.Certificate(CREDENTIALS_FILE)
+        if FIREBASE_CREDENTIALS_RAW:
+            # Environment Variable থেকে JSON লোড করা হচ্ছে
+            creds_dict = json.loads(FIREBASE_CREDENTIALS_RAW)
+            # Private Key এর ফরম্যাট ঠিক করা
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            cred = credentials.Certificate(creds_dict)
+        elif os.path.exists("firebase_credentials.json"):
+            # লোকাল কম্পিউটারে টেস্ট করার সুবিধার্থে ফাইল ব্যাকআপ
+            cred = credentials.Certificate("firebase_credentials.json")
+        else:
+            raise Exception("No Firebase Credentials found in Environment Variables or File!")
+
         firebase_admin.initialize_app(cred, {
             'databaseURL': FIREBASE_DB_URL
         })
@@ -272,14 +282,12 @@ async def receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_valid = check_postback_id(user_id_text)
 
     if is_valid:
-        # আইডি সঠিক হলে ভেরিফাই হবে
         final_keyboard = [
             [InlineKeyboardButton(f"🎮 {lang_data['play_btn']}", callback_data='play_hack_action')],
             [InlineKeyboardButton(f"📺 {lang_data['guide_btn']}", url=HOW_TO_USE_LINK)]
         ]
         await context.bot.send_photo(chat_id=chat_id, photo=IMAGE_URL_SUCCESS, caption=lang_data['success_msg'], parse_mode='HTML', reply_markup=InlineKeyboardMarkup(final_keyboard))
     else:
-        # আইডি ভুল / র্যান্ডম দিলে রিজেক্ট হবে
         retry_keyboard = [
             [InlineKeyboardButton(f"🔗 {lang_data['reg_btn']}", url="https://1wezue.com/casino")],
             [InlineKeyboardButton("🔄 Try Again", callback_data='verify_reg')]
