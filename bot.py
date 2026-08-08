@@ -26,44 +26,41 @@ class DummyHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot is running on Render with Firebase!")
+        self.wfile.write(b"Bot is running on Render!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    server.serve_forever()
+    try:
+        server = HTTPServer(("0.0.0.0", port), DummyHandler)
+        print(f"🌐 Web server running on port {port}")
+        server.serve_forever()
+    except Exception as e:
+        print(f"⚠️ Dummy server warning: {e}")
 
-# ================= FIREBASE SETUP (NO FILE REQUIRED) =================
+# ================= FIREBASE SETUP =================
 FIREBASE_DB_URL = "https://telegrambotdb-d2b45-default-rtdb.asia-southeast1.firebasedatabase.app/"
-
-# রেন্ডারের Environment Variable থেকে সরাসরি JSON ডাটা পড়া হবে
 FIREBASE_CREDENTIALS_RAW = os.getenv("FIREBASE_CREDENTIALS")
 
 try:
     if not firebase_admin._apps:
         if FIREBASE_CREDENTIALS_RAW:
-            # Environment Variable থেকে JSON লোড করা হচ্ছে
-            creds_dict = json.loads(FIREBASE_CREDENTIALS_RAW)
-            # Private Key এর ফরম্যাট ঠিক করা
-            if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            cred = credentials.Certificate(creds_dict)
+            try:
+                creds_dict = json.loads(FIREBASE_CREDENTIALS_RAW)
+                if "private_key" in creds_dict:
+                    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+                cred = credentials.Certificate(creds_dict)
+                firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
+                print("🔥 Firebase connected via ENV Variable! ✅")
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON ERROR in FIREBASE_CREDENTIALS: {e}")
         elif os.path.exists("firebase_credentials.json"):
-            # লোকাল কম্পিউটারে টেস্ট করার সুবিধার্থে ফাইল ব্যাকআপ
             cred = credentials.Certificate("firebase_credentials.json")
+            firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
+            print("🔥 Firebase connected via JSON File! ✅")
         else:
-            raise Exception("No Firebase Credentials found in Environment Variables or File!")
-
-        firebase_admin.initialize_app(cred, {
-            'databaseURL': FIREBASE_DB_URL
-        })
-        print("========================================")
-        print("🔥 Firebase connected successfully! ✅ 🔥")
-        print("========================================")
+            print("⚠️ WARNING: No Firebase Credentials found! Bot running without Firebase.")
 except Exception as e:
-    print("========================================")
-    print(f"❌ FIREBASE CONNECTION ERROR: {e} ❌")
-    print("========================================")
+    print(f"❌ FIREBASE INITIALIZATION ERROR: {e}")
 
 # ================= CONFIGURATION =================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8789480117:AAHQZ63ewvn7jjJMUxa9yLFRDemnS0zvSjA")
@@ -86,7 +83,6 @@ LOGO_PENALTY = "https://i.ibb.co/5WzBdWX4/hqdefault.jpg"
 LOGO_KING_THIMBLES = "https://i.ibb.co/8LYwvg1j/maxresdefault.jpg"
 LOGO_COIN = "https://i.ibb.co/jPb1tK68/file-000000009198720b89de6ec83058fd19.png"
 
-# --- HACK LINKS ---
 LINK_AVIATOR = "https://aviatorgameadmin.netlify.app/"
 LINK_AVIATOR_VIP = "https://blackdog.unaux.com/signal.html"
 LINK_LUCKY_JET = "https://1xbet-melbet-apple.unaux.com/signal.html"
@@ -97,11 +93,8 @@ LINK_KING_THIMBLES = "https://kingthimblesbot.netlify.app/"
 LINK_COIN = "https://sunny1.unaux.com/coin.html"
 HOW_TO_USE_LINK = "https://youtube.com/@sunny_bro11?si=gYfOtXnKayCkZloF"
 
-# --- CONVERSATION STATES ---
 WAITING_FOR_ID = 0
-(BROADCAST_SIMPLE, BTN_BROADCAST_CONTENT, BTN_BROADCAST_LABEL, BTN_BROADCAST_LINK, BROADCAST_AUTO_SIGNAL) = range(2, 7)
 
-# --- LANGUAGE CONFIG ---
 LANGUAGES = {
     'en': {
         'name': '🇺🇸 English',
@@ -141,34 +134,25 @@ def save_user(user_id):
         if not user_ref.get():
             user_ref.set({"status": "active"})
     except Exception as e:
-        print(f"❌ ERROR saving user: {e}")
-
-def get_users():
-    try:
-        ref = db.reference('users')
-        users_data = ref.get()
-        return list(users_data.keys()) if users_data else []
-    except Exception as e:
-        print(f"❌ ERROR fetching users: {e}")
-        return []
+        print(f"❌ Firebase save_user Error: {e}")
 
 def check_postback_id(account_id):
-    """পোস্টব্যাকের মাধ্যমে পাওয়া পোস্টব্যাক আইডি ফায়ারবেসে চেক করা"""
     try:
         ref = db.reference(f'approved_ids/{account_id}')
-        data = ref.get()
-        return data is not None
+        return ref.get() is not None
     except Exception as e:
-        print(f"❌ ERROR checking postback ID: {e}")
+        print(f"❌ Firebase check_postback_id Error: {e}")
         return False
 
-# ================= UTILITY FUNCTIONS =================
+# ================= SAFE MEMBERSHIP CHECK =================
 async def check_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE):
     try:
         member = await context.bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
         return member.status in [ChatMember.MEMBER, ChatMember.OWNER, ChatMember.ADMINISTRATOR]
-    except Exception:
-        return False
+    except Exception as e:
+        print(f"⚠️ CHANNEL CHECK ERROR (Make sure bot is ADMIN in channel {REQUIRED_CHANNEL}): {e}")
+        # যদি চ্যানেল চেক ফেল করে (যেমন বট এডমিন না থাকে), সাময়িকভাবে পাস করিয়ে দিবে যাতে বট আটকে না থাকে
+        return True
 
 async def send_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -180,7 +164,8 @@ async def send_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.callback_query:
-        await update.callback_query.message.delete()
+        try: await update.callback_query.message.delete()
+        except: pass
         await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=reply_markup)
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=reply_markup)
@@ -190,7 +175,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     save_user(user_id)
     
-    if await check_membership(user_id, context):
+    is_member = await check_membership(user_id, context)
+    
+    if is_member:
         await send_language_menu(update, context)
     else:
         join_text = (
@@ -206,8 +193,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
+    
     if await check_membership(update.effective_user.id, context):
-        await query.answer("✅ Verification Successful!")
         await send_language_menu(update, context)
     else:
         await query.answer("❌ You have not joined yet!", show_alert=True)
@@ -222,7 +210,9 @@ async def language_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [[InlineKeyboardButton(lang_data['earn_btn'], callback_data='start_earning')]]
     
-    await query.message.delete()
+    try: await query.message.delete()
+    except: pass
+    
     await context.bot.send_photo(chat_id=update.effective_chat.id, photo=IMAGE_URL_WELCOME, caption=f"Language: {lang_data['name']}\n\nClick below to proceed:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
@@ -246,7 +236,9 @@ async def show_registration_info(update: Update, context: ContextTypes.DEFAULT_T
         [InlineKeyboardButton(f"🆘 {lang_data['help_btn']}", url="https://t.me/SUNNY_BRO1")]
     ]
 
-    await query.message.delete()
+    try: await query.message.delete()
+    except: pass
+    
     await context.bot.send_photo(chat_id=update.effective_chat.id, photo=IMAGE_URL_REG, caption=info_text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
@@ -278,7 +270,6 @@ async def receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try: await context.bot.delete_message(chat_id=chat_id, message_id=analyzing_msg.message_id)
     except: pass
 
-    # --- 1WIN POSTBACK VALIDATION CHECK ---
     is_valid = check_postback_id(user_id_text)
 
     if is_valid:
@@ -366,5 +357,5 @@ if __name__ == '__main__':
     application.add_handler(CallbackQueryHandler(play_hack_menu, pattern='^play_hack_action$'))
     application.add_handler(CallbackQueryHandler(game_selection_handler, pattern='^game_'))
 
-    print("Bot is running... 🚀")
+    print("Bot is starting polling...")
     application.run_polling()
