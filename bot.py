@@ -2,7 +2,7 @@ import sys
 import os
 import urllib.parse
 
-# Render Logs-এ রিয়েলটাইম এরর দেখার জন্য আউটপুট আনবাফার করা হচ্ছে
+# Render Logs-এ রিয়েলটাইম এরর দেখার জন্য
 os.environ["PYTHONUNBUFFERED"] = "1"
 
 import logging
@@ -25,7 +25,6 @@ from telegram.ext import (
 import firebase_admin
 from firebase_admin import credentials, db
 
-# ================= SAFE ENV PARSER =================
 def get_env_int(key, default_value):
     val = os.getenv(key)
     if not val:
@@ -35,14 +34,12 @@ def get_env_int(key, default_value):
     except ValueError:
         return default_value
 
-# ================= CONFIGURATION =================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8789480117:AAHQZ63ewvn7jjJMUxa9yLFRDemnS0zvSjA").strip()
 ADMIN_ID = get_env_int("ADMIN_ID", 1146186608)
 REQUIRED_CHANNEL = get_env_int("REQUIRED_CHANNEL", -1001481593780)
 CHANNEL_LINK = "https://t.me/+3U0nMzWs4Aw0YjFl"
 FIREBASE_DB_URL = "https://telegrambotdb-d2b45-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-# ================= FIREBASE SETUP =================
 FIREBASE_CREDENTIALS_RAW = os.getenv("FIREBASE_CREDENTIALS")
 
 try:
@@ -66,25 +63,26 @@ try:
 except Exception as e:
     print(f"❌ FIREBASE INITIALIZATION ERROR: {e}")
 
-# ================= RENDER DUMMY & POSTBACK SERVER =================
+# ================= ADVANCED POSTBACK RECEIVER =================
 class PostbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_url = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed_url.query)
         
-        # 1Win থেকে user_id বা player_id রিসিভ করা
+        # 1Win এর সমস্ত সম্ভাব্য প্যারামিটার কি (Keys) চেক করা
         account_id = None
-        if 'user_id' in params:
-            account_id = params['user_id'][0]
-        elif 'player_id' in params:
-            account_id = params['player_id'][0]
+        possible_keys = ['user_id', 'player_id', 'sub_id', 'sub1', 'id', 'account_id', 'custom_id', 'client_id']
+        
+        for key in possible_keys:
+            if key in params and params[key][0]:
+                account_id = params[key][0].strip()
+                break
 
-        # যদি পোস্টব্যাক থেকে আইডি পাওয়া যায়
         if account_id:
             try:
                 ref = db.reference(f'approved_ids/{account_id}')
                 ref.set(True)
-                print(f"🔥 POSTBACK RECEIVED & APPROVED: Account ID {account_id} saved to Firebase! ✅")
+                print(f"🔥 POSTBACK RECEIVED & APPROVED: Account ID '{account_id}' saved to Firebase! ✅")
                 
                 self.send_response(200)
                 self.send_header("Content-type", "text/plain")
@@ -94,7 +92,7 @@ class PostbackHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"❌ ERROR saving Postback ID to Firebase: {e}")
 
-        # ডামি সার্ভার রেসপন্স (Health Check)
+        # Default Render Ping Response
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
@@ -167,7 +165,6 @@ LANGUAGES = {
     }
 }
 
-# ================= FIREBASE FUNCTIONS =================
 def save_user(user_id):
     try:
         ref = db.reference('users')
@@ -185,7 +182,6 @@ def check_postback_id(account_id):
         print(f"❌ Firebase check_postback_id Error: {e}")
         return False
 
-# ================= MEMBERSHIP CHECK =================
 async def check_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE):
     try:
         member = await context.bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
@@ -210,7 +206,6 @@ async def send_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=reply_markup)
 
-# ================= HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     save_user(user_id)
