@@ -1,8 +1,8 @@
 import sys
 import os
 import urllib.parse
+import re
 
-# Render Logs-এ রিয়েলটাইম এরর দেখার জন্য
 os.environ["PYTHONUNBUFFERED"] = "1"
 
 import logging
@@ -42,6 +42,11 @@ FIREBASE_DB_URL = "https://telegrambotdb-d2b45-default-rtdb.asia-southeast1.fire
 
 FIREBASE_CREDENTIALS_RAW = os.getenv("FIREBASE_CREDENTIALS")
 
+# ================= FIREBASE SETUP & TEST =================
+def sanitize_firebase_key(key_str):
+    """ফায়ারবেসের অবৈধ অক্ষর (. $ # [ ] /) মুছে ফেলে নিরাপদ কি (Key) তৈরি করে"""
+    return re.sub(r'[.$#\[\]/]', '', str(key_str)).strip()
+
 try:
     if not firebase_admin._apps:
         if FIREBASE_CREDENTIALS_RAW:
@@ -53,13 +58,22 @@ try:
                 firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
                 print("🔥 Firebase connected via ENV Variable! ✅")
             except Exception as e:
-                print(f"❌ JSON ERROR in FIREBASE_CREDENTIALS: {e}")
+                print(f"❌ JSON PARSE ERROR in FIREBASE_CREDENTIALS: {e}")
         elif os.path.exists("firebase_credentials.json"):
             cred = credentials.Certificate("firebase_credentials.json")
             firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
             print("🔥 Firebase connected via JSON File! ✅")
         else:
-            print("⚠️ WARNING: No Firebase Credentials found!")
+            print("⚠️ WARNING: No Firebase Credentials found in ENV or File!")
+
+    # --- ফায়ারবেস কানেকশন টেস্ট ---
+    try:
+        test_ref = db.reference('_connection_test')
+        test_ref.set({"status": "connected", "test": True})
+        print("✅ FIREBASE WRITE TEST SUCCESSFUL! Realtime Database is working perfectly!")
+    except Exception as db_err:
+        print(f"❌ FIREBASE WRITE TEST FAILED: {db_err}")
+
 except Exception as e:
     print(f"❌ FIREBASE INITIALIZATION ERROR: {e}")
 
@@ -69,7 +83,6 @@ class PostbackHandler(BaseHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed_url.query)
         
-        # 1Win এর সমস্ত সম্ভাব্য প্যারামিটার কি (Keys) চেক করা
         account_id = None
         possible_keys = ['user_id', 'player_id', 'sub_id', 'sub1', 'id', 'account_id', 'custom_id', 'client_id']
         
@@ -79,20 +92,21 @@ class PostbackHandler(BaseHTTPRequestHandler):
                 break
 
         if account_id:
-            try:
-                ref = db.reference(f'approved_ids/{account_id}')
-                ref.set(True)
-                print(f"🔥 POSTBACK RECEIVED & APPROVED: Account ID '{account_id}' saved to Firebase! ✅")
-                
-                self.send_response(200)
-                self.send_header("Content-type", "text/plain")
-                self.end_headers()
-                self.wfile.write(f"OK - Account ID {account_id} Approved!".encode('utf-8'))
-                return
-            except Exception as e:
-                print(f"❌ ERROR saving Postback ID to Firebase: {e}")
+            safe_id = sanitize_firebase_key(account_id)
+            if safe_id:
+                try:
+                    ref = db.reference(f'approved_ids/{safe_id}')
+                    ref.set(True)
+                    print(f"🔥 POSTBACK RECEIVED & APPROVED: Account ID '{safe_id}' saved to Firebase! ✅")
+                    
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(f"OK - Account ID {safe_id} Approved!".encode('utf-8'))
+                    return
+                except Exception as e:
+                    print(f"❌ ERROR saving Postback ID '{safe_id}' to Firebase: {e}")
 
-        # Default Render Ping Response
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
@@ -176,7 +190,10 @@ def save_user(user_id):
 
 def check_postback_id(account_id):
     try:
-        ref = db.reference(f'approved_ids/{account_id}')
+        safe_id = sanitize_firebase_key(account_id)
+        if not safe_id:
+            return False
+        ref = db.reference(f'approved_ids/{safe_id}')
         return ref.get() is not None
     except Exception as e:
         print(f"❌ Firebase check_postback_id Error: {e}")
@@ -187,7 +204,6 @@ async def check_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE):
         member = await context.bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
         return member.status in [ChatMember.MEMBER, ChatMember.OWNER, ChatMember.ADMINISTRATOR]
     except Exception as e:
-        print(f"⚠️ CHANNEL CHECK NOTICE: {e}")
         return True
 
 async def send_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
