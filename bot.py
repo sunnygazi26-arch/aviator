@@ -346,7 +346,7 @@ async def receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try: await context.bot.delete_message(chat_id=chat_id, message_id=analyzing_msg.message_id)
     except: pass
 
-    # ফায়ারবেসে চেক করা
+    # ফায়ারবেসে আইডি চেক করা
     is_valid = check_postback_id(user_id_text)
 
     if is_valid:
@@ -436,4 +436,10 @@ if __name__ == '__main__':
         application.add_handler(CallbackQueryHandler(language_handler, pattern='^lang_'))
         application.add_handler(CallbackQueryHandler(show_registration_info, pattern='^start_earning$'))
         application.add_handler(CallbackQueryHandler(play_hack_menu, pattern='^play_hack_action$'))
-        application.add_handler(Callbac
+        application.add_handler(CallbackQueryHandler(game_selection_handler, pattern='^game_'))
+
+        print("🤖 Telegram Bot Polling started successfully!")
+        application.run_polling()
+    except Exception as fatal_error:
+        print(f"❌ FATAL ERROR CAUSING CRASH: {fatal_error}")
+        sys.exit(1)
