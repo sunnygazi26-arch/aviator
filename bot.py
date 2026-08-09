@@ -1,13 +1,11 @@
 import sys
 import os
-import urllib.parse
-import re
 
+# Render Logs-এ রিয়েলটাইম প্রিন্ট দেখার জন্য
 os.environ["PYTHONUNBUFFERED"] = "1"
 
 import logging
 import asyncio
-import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember, WebAppInfo
@@ -21,10 +19,7 @@ from telegram.ext import (
     ConversationHandler
 )
 
-# --- ফায়ারবেস ইমপোর্ট ---
-import firebase_admin
-from firebase_admin import credentials, db
-
+# ================= SAFE ENV PARSER =================
 def get_env_int(key, default_value):
     val = os.getenv(key)
     if not val:
@@ -38,88 +33,23 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8789480117:AAHQZ63ewvn7jjJMUxa9yLFRDemnS0zvS
 ADMIN_ID = get_env_int("ADMIN_ID", 1146186608)
 REQUIRED_CHANNEL = get_env_int("REQUIRED_CHANNEL", -1001481593780)
 CHANNEL_LINK = "https://t.me/+3U0nMzWs4Aw0YjFl"
-FIREBASE_DB_URL = "https://telegrambotdb-d2b45-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
-FIREBASE_CREDENTIALS_RAW = os.getenv("FIREBASE_CREDENTIALS")
-
-# ================= FIREBASE SETUP & TEST =================
-def sanitize_firebase_key(key_str):
-    """ফায়ারবেসের অবৈধ অক্ষর (. $ # [ ] /) মুছে ফেলে নিরাপদ কি (Key) তৈরি করে"""
-    return re.sub(r'[.$#\[\]/]', '', str(key_str)).strip()
-
-try:
-    if not firebase_admin._apps:
-        if FIREBASE_CREDENTIALS_RAW:
-            try:
-                creds_dict = json.loads(FIREBASE_CREDENTIALS_RAW.strip())
-                if "private_key" in creds_dict:
-                    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-                cred = credentials.Certificate(creds_dict)
-                firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
-                print("🔥 Firebase connected via ENV Variable! ✅")
-            except Exception as e:
-                print(f"❌ JSON PARSE ERROR in FIREBASE_CREDENTIALS: {e}")
-        elif os.path.exists("firebase_credentials.json"):
-            cred = credentials.Certificate("firebase_credentials.json")
-            firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
-            print("🔥 Firebase connected via JSON File! ✅")
-        else:
-            print("⚠️ WARNING: No Firebase Credentials found in ENV or File!")
-
-    # --- ফায়ারবেস কানেকশন টেস্ট ---
-    try:
-        test_ref = db.reference('_connection_test')
-        test_ref.set({"status": "connected", "test": True})
-        print("✅ FIREBASE WRITE TEST SUCCESSFUL! Realtime Database is working perfectly!")
-    except Exception as db_err:
-        print(f"❌ FIREBASE WRITE TEST FAILED: {db_err}")
-
-except Exception as e:
-    print(f"❌ FIREBASE INITIALIZATION ERROR: {e}")
-
-# ================= ADVANCED POSTBACK RECEIVER =================
-class PostbackHandler(BaseHTTPRequestHandler):
+# ================= RENDER DUMMY SERVER =================
+class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        parsed_url = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed_url.query)
-        
-        account_id = None
-        possible_keys = ['user_id', 'player_id', 'sub_id', 'sub1', 'id', 'account_id', 'custom_id', 'client_id']
-        
-        for key in possible_keys:
-            if key in params and params[key][0]:
-                account_id = params[key][0].strip()
-                break
-
-        if account_id:
-            safe_id = sanitize_firebase_key(account_id)
-            if safe_id:
-                try:
-                    ref = db.reference(f'approved_ids/{safe_id}')
-                    ref.set(True)
-                    print(f"🔥 POSTBACK RECEIVED & APPROVED: Account ID '{safe_id}' saved to Firebase! ✅")
-                    
-                    self.send_response(200)
-                    self.send_header("Content-type", "text/plain")
-                    self.end_headers()
-                    self.wfile.write(f"OK - Account ID {safe_id} Approved!".encode('utf-8'))
-                    return
-                except Exception as e:
-                    print(f"❌ ERROR saving Postback ID '{safe_id}' to Firebase: {e}")
-
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot and Postback Server is running on Render!")
+        self.wfile.write(b"Auto-Approve Bot is running on Render!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
     try:
-        server = HTTPServer(("0.0.0.0", port), PostbackHandler)
-        print(f"🌐 Postback Web Server running on port {port}")
+        server = HTTPServer(("0.0.0.0", port), DummyHandler)
+        print(f"🌐 Web server running on port {port}")
         server.serve_forever()
     except Exception as e:
-        print(f"⚠️ Server error: {e}")
+        print(f"⚠️ Dummy server error: {e}")
 
 # --- MEDIA LINKS ---
 IMAGE_URL_WELCOME = "https://i.ibb.co/XfxnhBYY/file-000000006ac47206b9a3e5b41d2e17e1.png"
@@ -156,8 +86,7 @@ LANGUAGES = {
         'verify_btn': '✅ I have Registered (Verify)',
         'ask_id': 'Please send your 9-digit Account ID:',
         'analyzing': '🔄 Verifying your Account ID with 1Win Database...',
-        'success_msg': '✅ <b>ACCOUNT VERIFIED!</b>\n\nYour account has been successfully synchronized via Postback System.',
-        'failed_msg': '❌ <b>VERIFICATION FAILED!</b>\n\nThis Account ID is not registered under our link or promo code. Please register a new account using our link and try again.',
+        'success_msg': '✅ <b>ACCOUNT VERIFIED!</b>\n\nYour account has been successfully synchronized with the bot.',
         'play_btn': 'Play With Hack',
         'guide_btn': 'How to use',
         'help_btn': 'Help',
@@ -170,8 +99,7 @@ LANGUAGES = {
         'verify_btn': '✅ আমার রেজিস্ট্রেশন সম্পন্ন হয়েছে',
         'ask_id': 'অনুগ্রহ করে আপনার ৯ ডিজিটের একাউন্ট আইডি দিন:',
         'analyzing': '🔄 আপনার আইডিটি 1Win ডেটাবেজে যাচাই করা হচ্ছে...',
-        'success_msg': '✅ <b>একাউন্ট ভেরিফাইড!</b>\n\nপোস্টব্যাক সিস্টেমের মাধ্যমে আপনার একাউন্ট সফলভাবে যুক্ত হয়েছে।',
-        'failed_msg': '❌ <b>ভেরিফিকেশন ব্যর্থ হয়েছে!</b>\n\nএই একাউন্ট আইডিটি আমাদের প্রমো কোড বা লিংক দিয়ে তৈরি করা হয়নি। দয়া করে আমাদের লিংকে গিয়ে নতুন অ্যাকাউন্ট খুলে চেষ্টা করুন।',
+        'success_msg': '✅ <b>একাউন্ট ভেরিফাইড!</b>\n\nআপনার একাউন্টটি সফলভাবে বটের সাথে যুক্ত হয়েছে।',
         'play_btn': 'Play With Hack',
         'guide_btn': 'কিভাবে ব্যবহার করবেন',
         'help_btn': 'সাহায্য',
@@ -179,26 +107,7 @@ LANGUAGES = {
     }
 }
 
-def save_user(user_id):
-    try:
-        ref = db.reference('users')
-        user_ref = ref.child(str(user_id))
-        if not user_ref.get():
-            user_ref.set({"status": "active"})
-    except Exception as e:
-        print(f"❌ Firebase save_user Error: {e}")
-
-def check_postback_id(account_id):
-    try:
-        safe_id = sanitize_firebase_key(account_id)
-        if not safe_id:
-            return False
-        ref = db.reference(f'approved_ids/{safe_id}')
-        return ref.get() is not None
-    except Exception as e:
-        print(f"❌ Firebase check_postback_id Error: {e}")
-        return False
-
+# ================= MEMBERSHIP CHECK =================
 async def check_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE):
     try:
         member = await context.bot.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id)
@@ -222,9 +131,9 @@ async def send_language_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=welcome_text, reply_markup=reply_markup)
 
+# ================= HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    save_user(user_id)
     
     is_member = await check_membership(user_id, context)
     
@@ -301,7 +210,7 @@ async def verify_process_start(update: Update, context: ContextTypes.DEFAULT_TYP
     lang_code = context.user_data.get('selected_lang', 'en')
     lang_data = LANGUAGES.get(lang_code, LANGUAGES['en'])
 
-    msg = await context.bot.send_message(chat_id=chat_id, text="⏳ Initializing Postback verification...")
+    msg = await context.bot.send_message(chat_id=chat_id, text="⏳ Initializing verification...")
     await asyncio.sleep(2) 
     try: await context.bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
     except: pass
@@ -315,26 +224,25 @@ async def receive_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang_code = context.user_data.get('selected_lang', 'en')
     lang_data = LANGUAGES.get(lang_code, LANGUAGES['en'])
 
+    # ইউজার আইডি সংখ্যা কিনা এবং অন্তত ৮ থেকে ১২ ডিজিটের কিনা তা নিশ্চিত করা
+    if not user_id_text.isdigit() or len(user_id_text) < 7:
+        await update.message.reply_text("❌ Invalid Account ID! Please enter a valid numeric 8-9 digit Account ID.")
+        return WAITING_FOR_ID
+
     analyzing_msg = await update.message.reply_text(f"⏳ {lang_data['analyzing']}")
-    await asyncio.sleep(2)
+    
+    # ৩ সেকেন্ড ভেরিফিকেশনের নাটক (Simulated Checking)
+    await asyncio.sleep(3)
     
     try: await context.bot.delete_message(chat_id=chat_id, message_id=analyzing_msg.message_id)
     except: pass
 
-    is_valid = check_postback_id(user_id_text)
-
-    if is_valid:
-        final_keyboard = [
-            [InlineKeyboardButton(f"🎮 {lang_data['play_btn']}", callback_data='play_hack_action')],
-            [InlineKeyboardButton(f"📺 {lang_data['guide_btn']}", url=HOW_TO_USE_LINK)]
-        ]
-        await context.bot.send_photo(chat_id=chat_id, photo=IMAGE_URL_SUCCESS, caption=lang_data['success_msg'], parse_mode='HTML', reply_markup=InlineKeyboardMarkup(final_keyboard))
-    else:
-        retry_keyboard = [
-            [InlineKeyboardButton(f"🔗 {lang_data['reg_btn']}", url="https://1wezue.com/casino")],
-            [InlineKeyboardButton("🔄 Try Again", callback_data='verify_reg')]
-        ]
-        await context.bot.send_message(chat_id=chat_id, text=lang_data['failed_msg'], parse_mode='HTML', reply_markup=InlineKeyboardMarkup(retry_keyboard))
+    # AUTO-APPROVE: যেকোনো ডিজিট দিলেই সাথে সাথে এপ্রুভ
+    final_keyboard = [
+        [InlineKeyboardButton(f"🎮 {lang_data['play_btn']}", callback_data='play_hack_action')],
+        [InlineKeyboardButton(f"📺 {lang_data['guide_btn']}", url=HOW_TO_USE_LINK)]
+    ]
+    await context.bot.send_photo(chat_id=chat_id, photo=IMAGE_URL_SUCCESS, caption=lang_data['success_msg'], parse_mode='HTML', reply_markup=InlineKeyboardMarkup(final_keyboard))
 
     return ConversationHandler.END
 
@@ -390,7 +298,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == '__main__':
     try:
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-        print("🚀 Starting Telegram Bot process...")
+        print("🚀 Starting Auto-Approve Telegram Bot process...")
         
         threading.Thread(target=run_dummy_server, daemon=True).start()
 
@@ -411,7 +319,7 @@ if __name__ == '__main__':
         application.add_handler(CallbackQueryHandler(play_hack_menu, pattern='^play_hack_action$'))
         application.add_handler(CallbackQueryHandler(game_selection_handler, pattern='^game_'))
 
-        print("🤖 Telegram Bot Polling started successfully!")
+        print("🤖 Auto-Approve Bot Polling started successfully!")
         application.run_polling()
     except Exception as fatal_error:
         print(f"❌ FATAL ERROR CAUSING CRASH: {fatal_error}")
