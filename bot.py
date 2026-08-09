@@ -1,5 +1,6 @@
 import sys
 import os
+import urllib.parse
 
 # Render Logs-এ রিয়েলটাইম এরর দেখার জন্য আউটপুট আনবাফার করা হচ্ছে
 os.environ["PYTHONUNBUFFERED"] = "1"
@@ -19,7 +20,6 @@ from telegram.ext import (
     filters, 
     ConversationHandler
 )
-from telegram.error import BadRequest, Forbidden
 
 # --- ফায়ারবেস ইমপোর্ট ---
 import firebase_admin
@@ -33,7 +33,6 @@ def get_env_int(key, default_value):
     try:
         return int(val.strip())
     except ValueError:
-        print(f"⚠️ WARNING: Environment variable {key}='{val}' is invalid integer. Using default: {default_value}")
         return default_value
 
 # ================= CONFIGURATION =================
@@ -41,26 +40,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8789480117:AAHQZ63ewvn7jjJMUxa9yLFRDemnS0zvS
 ADMIN_ID = get_env_int("ADMIN_ID", 1146186608)
 REQUIRED_CHANNEL = get_env_int("REQUIRED_CHANNEL", -1001481593780)
 CHANNEL_LINK = "https://t.me/+3U0nMzWs4Aw0YjFl"
-
-# ================= RENDER DUMMY SERVER =================
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is running on Render!")
-
-def run_dummy_server():
-    port = int(os.environ.get("PORT", 10000))
-    try:
-        server = HTTPServer(("0.0.0.0", port), DummyHandler)
-        print(f"🌐 Web server running on port {port}")
-        server.serve_forever()
-    except Exception as e:
-        print(f"⚠️ Dummy server error: {e}")
+FIREBASE_DB_URL = "https://telegrambotdb-d2b45-default-rtdb.asia-southeast1.firebasedatabase.app/"
 
 # ================= FIREBASE SETUP =================
-FIREBASE_DB_URL = "https://telegrambotdb-d2b45-default-rtdb.asia-southeast1.firebasedatabase.app/"
 FIREBASE_CREDENTIALS_RAW = os.getenv("FIREBASE_CREDENTIALS")
 
 try:
@@ -80,9 +62,52 @@ try:
             firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_DB_URL})
             print("🔥 Firebase connected via JSON File! ✅")
         else:
-            print("⚠️ WARNING: No Firebase Credentials found! Running without Firebase.")
+            print("⚠️ WARNING: No Firebase Credentials found!")
 except Exception as e:
     print(f"❌ FIREBASE INITIALIZATION ERROR: {e}")
+
+# ================= RENDER DUMMY & POSTBACK SERVER =================
+class PostbackHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed_url = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed_url.query)
+        
+        # 1Win থেকে user_id বা player_id রিসিভ করা
+        account_id = None
+        if 'user_id' in params:
+            account_id = params['user_id'][0]
+        elif 'player_id' in params:
+            account_id = params['player_id'][0]
+
+        # যদি পোস্টব্যাক থেকে আইডি পাওয়া যায়
+        if account_id:
+            try:
+                ref = db.reference(f'approved_ids/{account_id}')
+                ref.set(True)
+                print(f"🔥 POSTBACK RECEIVED & APPROVED: Account ID {account_id} saved to Firebase! ✅")
+                
+                self.send_response(200)
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                self.wfile.write(f"OK - Account ID {account_id} Approved!".encode('utf-8'))
+                return
+            except Exception as e:
+                print(f"❌ ERROR saving Postback ID to Firebase: {e}")
+
+        # ডামি সার্ভার রেসপন্স (Health Check)
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot and Postback Server is running on Render!")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+    try:
+        server = HTTPServer(("0.0.0.0", port), PostbackHandler)
+        print(f"🌐 Postback Web Server running on port {port}")
+        server.serve_forever()
+    except Exception as e:
+        print(f"⚠️ Server error: {e}")
 
 # --- MEDIA LINKS ---
 IMAGE_URL_WELCOME = "https://i.ibb.co/XfxnhBYY/file-000000006ac47206b9a3e5b41d2e17e1.png"
@@ -375,7 +400,7 @@ if __name__ == '__main__':
         application.add_handler(CallbackQueryHandler(play_hack_menu, pattern='^play_hack_action$'))
         application.add_handler(CallbackQueryHandler(game_selection_handler, pattern='^game_'))
 
-        print("🤖 Telegram Bot Polling started successfully! Listening for messages...")
+        print("🤖 Telegram Bot Polling started successfully!")
         application.run_polling()
     except Exception as fatal_error:
         print(f"❌ FATAL ERROR CAUSING CRASH: {fatal_error}")
